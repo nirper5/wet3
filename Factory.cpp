@@ -328,8 +328,8 @@ int Factory::finishCompanyBuyer(unsigned int id){
     pthread_join(it->second, (void**)&res);
 
 
-    std::cout << "Number of products in Available is " << Available.size() <<  " Thread id is "<<   id <<"\n " << std::endl;
-    std::cout << "Number of products returned " << *res <<   " Thread id is "<<  id <<  "\n " << std::endl;
+   // std::cout << "Number of products in Available is " << Available.size() <<  " Thread id is "<<   id <<"\n " << std::endl;
+   // std::cout << "Number of products returned " << *res <<   " Thread id is "<<  id <<  "\n " << std::endl;
 
     // remove thread from map
     Threads.erase(it);
