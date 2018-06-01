@@ -8,6 +8,7 @@
 typedef struct produce_t{
     int num_products;
     Product* products;
+    Factory* factory;
 } Produce;
 
 
@@ -18,10 +19,10 @@ typedef struct company_buyer_t{
 } CompanyBuyer;
 
 
-typedef struct thief_t{
-    int num_products;
-    unsigned int fake_id;
-} Thief;
+//typedef struct thief_t{
+//    int num_products;
+//    unsigned int fake_id;
+//}Thief;
 
 //static void* wrapper_returnProducts(void* crp){
 //    Company_return_products* struct_crp  = static_cast<Company_return_products*->crp;
@@ -33,12 +34,19 @@ typedef struct thief_t{
 
 
 
-//static void* wrapper_produce(void* new_produce){
-//    Produce* new_produce_c = static_cast<Produce*> (new_produce);
-//    int num_products = new_produce_c->num_products;
-//    Product* products = new_produce_c->products;
-//    return produce(num_products, products);
-//}
+static void* wrapper_produce(void* new_produce) {
+    auto *new_produce_c = static_cast<Produce *> (new_produce);
+    Factory *factory = new_produce_c->factory;
+    int num_products = new_produce_c->num_products;
+    Product *products = new_produce_c->products;
+
+
+    delete new_produce_c;
+
+    factory->produce(num_products, products);
+    return nullptr;
+}
+
 
 //static void* wrapper_stealProducts(void* sp){
 //
@@ -156,12 +164,77 @@ Factory::~Factory(){
 }
 
 void Factory::startProduction(int num_products, Product* products,unsigned int id){
+
+    if(num_products <=0 || products == nullptr ){
+        return;
+    }
+
+    Produce* new_produce = new Produce;
+    new_produce->factory=this;
+    new_produce->num_products=num_products;
+    new_produce->products=products;
+
+    pthread_t pthread_produce;
+    pthread_create(&pthread_produce, NULL, &wrapper_produce ,new_produce);
+
+    std::pair<std::map<unsigned int  , pthread_t>::iterator, bool> res = Threads.insert(std::pair<unsigned int ,pthread_t>(id,pthread_produce)); // insert thread with id to map
+
+            // (Nir) DEBUGGING
+    if ( ! res.second ) {
+        std::cout << "key " <<  id << " already exists "
+                  << " with value " << (res.first)->second <<  "\n" << std::endl;
+    } else {
+        std::cout << "created key " << id << " with value " << pthread_produce <<  "\n " <<std::endl;
+    }
 }
 
 void Factory::produce(int num_products, Product* products){
+
+   // std::cout<<"insert to produce"<<std::endl;
+
+    if(num_products <= 0 || products== nullptr) return;
+
+    pthread_mutex_lock(&global_lock);
+
+    for (int i = 0; i < num_products; ++i) {
+
+     //   std::cout << "insert product num:" << products[i].getValue() << std::endl;
+
+        Available.push_back(products[i]);
+    }
+
+    pthread_mutex_unlock(&global_lock);
+
+   // std::cout << "return from produce"<<std::endl;
 }
 
 void Factory::finishProduction(unsigned int id){
+
+    //  std::cout << "Thread is in finishCompanyBuyer " <<  "\n " << std::endl;
+
+
+    // Looking for the thread
+    std::map<unsigned int  , pthread_t>::iterator it;
+    it = Threads.find(id);
+    if (it == Threads.end() )
+        std::cout << "id " << id << "is not in map";
+
+
+    //   std::cout << "Thread id is " << it->second << "\n " << std::endl;
+
+
+    //std::cout << "Thread waiting join  " << it->second << std::endl;
+
+    //no need for return value
+    pthread_join(it->second, NULL);
+
+
+    // std::cout << "Number of products in Available is " << Available.size() <<  " Thread id is "<<   id <<"\n " << std::endl;
+    // std::cout << "Number of products returned " << *res <<   " Thread id is "<<  id <<  "\n " << std::endl;
+
+    // remove thread from map
+    Threads.erase(it);
+    return;
 }
 
 void Factory::startSimpleBuyer(unsigned int id){
