@@ -3,4 +3,4 @@ project(wet3)
 
 set(CMAKE_CXX_STANDARD 11)
 
-add_executable(wet3 main.cpp Product.h Factory.h Factory.cpp)
+add_executable(wet3 main.cpp Factory.cpp )
