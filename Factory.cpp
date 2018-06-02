@@ -8,6 +8,7 @@
 typedef struct produce_t{
     int num_products;
     Product* products;
+    Factory* factory;
 } Produce;
 
 
@@ -25,12 +26,34 @@ typedef struct thief_t{
 } Thief;
 
 
-//static void* wrapper_produce(void* new_produce){
-//    Produce* new_produce_c = static_cast<Produce*> (new_produce);
-//    int num_products = new_produce_c->num_products;
-//    Product* products = new_produce_c->products;
-//    return produce(num_products, products);
-//}
+static void* wrapper_produce(void* new_produce) {
+
+    // std::cout << "insert to wrapper produce" << std::endl;
+
+    auto *new_produce_c = static_cast<Produce *> (new_produce);
+    Factory *factory = new_produce_c->factory;
+    int num_products = new_produce_c->num_products;
+    Product *products = new_produce_c->products;
+
+
+    delete new_produce_c;
+
+    // std::cout << "call produce" << std::endl;
+
+    factory->produce(num_products, products);
+    return nullptr;
+}
+
+static void* wrapper_simple_buyer(void* factory){
+
+    //   std::cout<< "insert to wrapper_simple_buyer" <<std::endl;
+
+    auto new_factory = static_cast<Factory *> (factory);
+    int* res = new int;
+    *res = new_factory->tryBuyOne();
+    return res;
+}
+
 
 static void* wrapper_startThief(void* sp){
 
@@ -128,7 +151,13 @@ Factory::Factory(){
     num_of_buyers= 0;
     pthread_cond_init(&thieves, NULL);
     pthread_cond_init(&companies, NULL);
-    pthread_mutex_init(&global_lock,NULL);
+
+    //nir add this
+    pthread_mutexattr_init(&Attr);
+    pthread_mutexattr_settype(&Attr, PTHREAD_MUTEX_ERRORCHECK);
+
+    pthread_mutex_init(&global_lock, &Attr);
+
 
 }
 
@@ -140,24 +169,184 @@ Factory::~Factory(){
 }
 
 void Factory::startProduction(int num_products, Product* products,unsigned int id){
+
+    //   std::cout<<"enter to startProduction" <<std::endl;
+
+    if(num_products <=0 || products == nullptr ){
+        return;
+    }
+
+    Produce* new_produce = new Produce;
+    new_produce->factory=this;
+    new_produce->num_products=num_products;
+    new_produce->products=products;
+
+    pthread_t pthread_produce;
+    pthread_create(&pthread_produce, NULL, &wrapper_produce ,new_produce);
+
+    std::pair<std::map<unsigned int  , pthread_t>::iterator, bool> res = Threads.insert(std::pair<unsigned int ,pthread_t>(id,pthread_produce)); // insert thread with id to map
+
+    // (Nir) DEBUGGING
+//    if ( ! res.second ) {
+//        std::cout << "key " <<  id << " already exists "
+//                  << " with value " << (res.first)->second <<  "\n" << std::endl;
+//    } else {
+//        std::cout << "created key " << id << " with value " << pthread_produce <<  "\n " <<std::endl;
+//    }
 }
 
 void Factory::produce(int num_products, Product* products){
+
+    //  std::cout<<"insert to produce"<<std::endl;
+
+    if(num_products <= 0 || products== nullptr) return;
+
+    pthread_mutex_lock(&global_lock);
+
+    for (int i = 0 ; i < num_products ; i++) {
+
+        //   std::cout << "insert product num:" << products[i].getValue() << std::endl;
+
+        Available.push_back(products[i]);
+    }
+
+    //   std::cout<<"current in available:"<<std::endl;
+//    for(auto v : Available){
+//        std::cout << v.getId() << std::endl;
+//    }
+
+    // Wake the rest of the threads
+    pthread_cond_signal(&thieves);
+    //     std::cout << "Thread is running keep1 " << pthread_self() << "\n " << std::endl;
+    pthread_cond_broadcast(&companies);
+
+    pthread_mutex_unlock(&global_lock);
+
+    //   std::cout << "return from produce"<<std::endl;
 }
 
 void Factory::finishProduction(unsigned int id){
+
+    //  std::cout << "Thread is in finishProduction " <<  "\n " << std::endl;
+
+
+    // Looking for the thread
+    std::map<unsigned int  , pthread_t>::iterator it;
+    it = Threads.find(id);
+    if (it == Threads.end() )
+        std::cout << "id " << id << "is not in map";
+
+
+    // std::cout << "Thread id is " << it->second << "\n " << std::endl;
+
+    int* res;
+    pthread_join(it->second, (void**)&res);
+
+    //std::cout << "Thread waiting join  " << it->second << std::endl;
+
+    //no need for return value
+    // remove thread from map
+    Threads.erase(it);
+    return;
 }
 
 void Factory::startSimpleBuyer(unsigned int id){
+
+    //std::cout << "insert to startSimpleBuyer" << std::endl;
+
+    pthread_t pthread_simple_buyer;
+    pthread_create(&pthread_simple_buyer, NULL, &wrapper_simple_buyer, this);
+    std::pair<std::map<unsigned int  , pthread_t>::iterator, bool> res = Threads.insert(std::pair<unsigned int ,pthread_t>(id,pthread_simple_buyer)); // insert thread with id to map
+
+//    if ( ! res.second ) {
+//        std::cout << "key " <<  id << " already exists "
+//                  << " with value " << (res.first)->second <<  "\n" << std::endl;
+//    } else {
+//        std::cout << "created key " << id << " with value " << pthread_simple_buyer <<  "\n " <<std::endl;
+//    }
+
 }
 
 int Factory::tryBuyOne(){
-    return -1;
+
+    //simple buyer can get the lock only if there is other thread working.
+    int res = pthread_mutex_trylock(&global_lock);
+    if(res != 0){
+
+        // std::cout<<"cannot open the mutex in try buy one with res:"<< res <<std::endl;
+
+        return -1;
+    }
+
+    //right here the lock is occupied
+    if(!factory_open || Available.size() <= 0 ){
+
+        //   std::cout<<"in try buy one availble size is:" << Available.size() << std::endl;
+
+        pthread_mutex_unlock(&global_lock);
+        return -1;
+    }
+    num_of_buyers++;
+
+    // std::cout<<"pop one product in tryBuyOne"<<std::endl;
+
+    std::list<Product>::iterator it = Available.begin();
+    int product_id = (*it).getId();
+
+    //  std::cout<<"product_id_erase="<<product_id<<std::endl;
+
+    Available.erase(it);
+    num_of_buyers--;
+
+    // Wake the rest of the threads
+    pthread_cond_signal(&thieves);
+    //     std::cout << "Thread is running keep1 " << pthread_self() << "\n " << std::endl;
+    pthread_cond_broadcast(&companies);
+
+    pthread_mutex_unlock(&global_lock);
+    return product_id;
 }
 
 int Factory::finishSimpleBuyer(unsigned int id){
-    return -1;
+
+//    std::cout << "insert to finishSimpleBuyer" << std::endl;
+
+    std::map<unsigned int  , pthread_t>::iterator it;
+    it = Threads.find(id);
+    if (it == Threads.end() ){
+        std::cout << "id " << id << "is not in map" << std::endl;
+//        std::cout << "current threads in the map:" << std::endl;
+//        for(auto v : Threads){
+//            std::cout << v.first << std::endl;
+//        }
+    }
+
+
+    int* res;
+
+    //   std::cout<< "waiting for thread finis in finishSimpleBuyer" << std::endl;
+
+    pthread_join(it->second, (void**)&res);
+
+
+    //    std::cout << "after join in try buy one Number of products in Available is " << Available.size() <<  " Thread id is "<<   id <<"\n " << std::endl;
+    // std::cout << "Number of products returned " << *res <<   " Thread id is "<<  id <<  "\n " << std::endl;
+
+    unsigned int to_remove= (*it).first;
+    //  std::cout<<"before erase thread num:"<< to_remove <<std::endl;
+    // remove thread from map
+    Threads.erase(it);
+
+    //  std::cout<<"after erase thread num:"<< to_remove <<std::endl;
+
+    int ret = *res;
+    delete(res);    // free allocated integer
+    res= nullptr;
+
+    return ret;
 }
+
+
 int j=0;
 void Factory::startCompanyBuyer(int num_products, int min_value,unsigned int id){
 

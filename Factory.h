@@ -64,6 +64,7 @@ private:
     pthread_cond_t thieves;
     pthread_cond_t companies;
     pthread_mutex_t global_lock;
+    pthread_mutexattr_t Attr;
 
 
 

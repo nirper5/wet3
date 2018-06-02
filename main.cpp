@@ -1,324 +1,241 @@
-#include "Factory.h"
+#include <iostream>
 #include <assert.h>
+#include "Factory.h"
+#include <unistd.h>
 
-int startSimpleBuyerTest(){
-    Product p1(1,1);
-    Product p2(2,2);
-    Product p3(3,3);
-    Product p4(4,4);
-    Product p5(5,5);
-    Product p6(6,6);
-    Product productArr[2];
-    Product productArr1[3];
-    Product productArr2[1];
-    productArr[0]=p1;
-    productArr[1]=p2;
-    productArr1[0]=p3;
-    productArr1[1]=p4;
-    productArr1[2]=p5;
-    productArr2[0]=p6;
-    Factory factory;
-    factory.openFactory();
-    factory.startSimpleBuyer(3);
-    assert(factory.finishSimpleBuyer(3) == -1);
-    factory.startProduction(2,productArr,1);
-    factory.finishProduction(1);
-    factory.startSimpleBuyer(4);
-    assert(factory.finishSimpleBuyer(4) == 1);
-    factory.closeFactory();
+int simpleBuyerTest()
+{
+    Product a(1,1);
+    Product b(2,2);
+    Factory* f = new Factory();
+    Product pro[2] = {b,a};
+    // Checking if the factory is empty and a simple buyer tries to buy
+    f->startSimpleBuyer(1);
+    assert(f->finishSimpleBuyer(1) == -1);
+
+    // Adding products to factory
+    f->startProduction(2, pro, 1);
+    f->finishProduction(1);
+    std::list<Product> list = f->listAvailableProducts();
+    assert(list.size() == 2);
+    Product c = list.front();
+    assert(c.getId() == 2);
+    list.clear();
+
+    // Adding simple buyers
+    f->startSimpleBuyer(2);
+    sleep(1);
+    f->startSimpleBuyer(1);
+    assert(f->finishSimpleBuyer(1) == 1);
+    assert(f->finishSimpleBuyer(2) == 2);
+    list = f->listAvailableProducts();
+    assert(list.size() == 0);
+
+    // Adding another product
+    f->startProduction(1, &a, 1);
+    f->finishProduction(1);
+
+    // Closing the factory
+    f->closeFactory();
+    f->startSimpleBuyer(3);
+    assert(f->finishSimpleBuyer(3) == -1);
+
+    // Opening the factory
+    f->openFactory();       // I had a bug here, forgot to unlock a lock if the
+    //                          simple buyer could only take one of the locks
+
+    // Again trying to buy
+    f->startSimpleBuyer(4);
+    assert(f->finishSimpleBuyer(4) == 1);
+    list.clear();
+    list = f->listAvailableProducts();
+    assert(list.size() == 0);
+    delete f;
     return 0;
 }
 
-int produceTest(){
-    Product p1(1,1);
-    Product p2(2,2);
-    Product p3(3,3);
-    Product p4(4,4);
-    Product p5(5,5);
-    Product p6(6,6);
-    Product productArr[2];
-    Product productArr1[3];
-    Product productArr2[1];
-    productArr[0]=p1;
-    productArr[1]=p2;
-    productArr1[0]=p3;
-    productArr1[1]=p4;
-    productArr1[2]=p5;
-    productArr2[0]=p6;
-    Factory factory;
-    factory.openFactory();
-    factory.startProduction(2,productArr,1);
-    factory.finishProduction(1);
+int companyTest()
+{
+    Product a(1,1);
+    Product b(2,2);
+    Product c(3,3);
+    Factory* f = new Factory();
+    Product pro[2] = {b,a};
+    std::list<Product> list;
+    // Creating a new company
+    f->startCompanyBuyer(2, 1, 1); // This company should wait
+    f->startProduction(2, pro, 2); // The company should start buying
+    assert(f->finishCompanyBuyer(1) == 0); // I had a bug here, forgot to broadcast after
+    // making new products
+    f->finishProduction(2);
+    list = f->listAvailableProducts();
+    assert(list.size() == 0);
+    // Closing the factory, adding a new company, adding new products and then opening
+    f->closeFactory();
+    f->startCompanyBuyer(2, 0, 3);
+    f->startProduction(2, pro, 4);
+    f->finishProduction(4);
+    list = f->listAvailableProducts();
+    assert(list.size() == 2);
+    list.clear();
+    f->openFactory();
+    assert(f->finishCompanyBuyer(3) == 0);
+    list = f->listAvailableProducts();
+    assert(list.size() == 0);
+    // Adding a new company and a thief - synchronization test
+    f->closeFactory();
+    f->startProduction(2, pro, 4);
+    f->startThief(1, 5);
+    f->startCompanyBuyer(1, 0, 6);
+    f->finishProduction(4);
+    f->openFactory();
+    assert(f->finishCompanyBuyer(6) == 0);
+    f->finishThief(5);
+    std::list<std::pair<Product, int>> stolen = f->listStolenProducts();
+    assert(stolen.size() == 1);
+    std::pair<Product, int> stolen_product = stolen.front();
+    assert(stolen_product.second == 5);
+    assert(stolen_product.first.getId() == 2);
+    stolen.clear();
+    // Closing the returning service, adding a new company and produce products which has low value
+    f->closeReturningService();
+    f->produce(2, pro);
+    f->startCompanyBuyer(2, 2, 7);
+    sleep(1);
+    list.clear();
+    list = f->listAvailableProducts();
+    assert(list.size() == 0);
+    f->openReturningService();
+    f->finishCompanyBuyer(7);
+    list.clear();
+    list = f->listAvailableProducts();
+    assert(list.size() == 1);
+    f->startSimpleBuyer(8);
+    f->finishSimpleBuyer(8);
+    list.clear();
+    delete f;
+    return 0;
+}
 
+int thiefTest()
+{
+    Product a(1,1);
+    Product b(2,2);
+    Product c(3,3);
+    Factory* f = new Factory();
+    Product pro2[3] = {c,b,a};
+    // Empty factory test
+    f->startThief(100, 1);
+    assert(f->finishThief(1) == 0);
+    // There are to many products in company
+    f->startProduction(3, pro2, 2);
+    f->finishProduction(2);
+    f->startThief(1, 3);
+    assert(f->finishThief(3) == 1);
+    // There isn't enoght products in the company
+    f->startThief(5, 4);
+    assert(f->finishThief(4) == 2);
+    // There is exactly the maximum products a thief can carry
+    f->startProduction(1, &a, 5);
+    f->finishProduction(5);
+    f->startThief(1, 6);
+    assert(f->finishThief(6) == 1);
+    delete f;
+    return 0;
+}
 
-    //print all the avilable products
-    for (auto v : factory.listAvailableProducts())
-        std::cout << v.getValue() << "\n";
+int mainThreadTest()
+{
+    Product a(1,1);
+    Product b(2,2);
+    Product c(3,3);
+    Factory* f = new Factory();
+    Product pro[3] = {c,b,a};
+    f->produce(3, pro);
+    assert(f->tryBuyOne() == 3);
+    std::list<Product> list = f->buyProducts(2);
+    f->returnProducts(list, 0);
+    list.clear();
+    delete f;
+    return 0;
+}
 
+int smallSynchronizationTest()
+{
+    Product a(1,1);
+    Product b(2,2);
+    Product c(3,3);
+    Product d(4,4);
+    Product e(5,5);
+    Product g(6,6);
+    Product pro[6] = {a,b,c,d,e,g};
+    Factory* f = new Factory();
+    f->closeFactory();
+    f->produce(6, pro);
+    f->startCompanyBuyer(4, 10, 1);
+    f->startCompanyBuyer(3, 10, 2);
+    f->startThief(1, 3);
+    f->startThief(1, 4);
+    f->startCompanyBuyer(2, 10, 5);
+    f->startCompanyBuyer(1, 10, 6);
+    f->openFactory();
+    assert(f->finishCompanyBuyer(1) == 4);
+    assert(f->finishCompanyBuyer(2) == 3);
+    assert(f->finishCompanyBuyer(5) == 2);
+    assert(f->finishCompanyBuyer(6) == 1);
+    assert(f->finishThief(3) == 1);
+    assert(f->finishThief(4) == 1);
+    f->startCompanyBuyer(4, 0, 7);
+    f->finishCompanyBuyer(7);
+    delete f;
+    return 0;
+}
 
-    factory.produce(3,productArr1);
-    for (int i = 0; i < 912321424; ++i) {
-
+int bigSynchronizationTest()
+{
+    Product a(1,1);
+    Factory* f = new Factory();
+    f->closeFactory();
+    for (int i = 0; i < 100; i++)
+    {
+        f->produce(1, &a);
     }
-
-    for (auto v : factory.listAvailableProducts())
-        std::cout << v.getValue() << "\n";
-
-    factory.closeFactory();
-    return 0;
-}
-
-int startProductionTest(){
-    Product p1(1,1);
-    Product p2(2,2);
-    Product p3(3,3);
-    Product p4(4,4);
-    Product p5(5,5);
-    Product p6(6,6);
-    Product productArr[2];
-    Product productArr1[3];
-    Product productArr2[1];
-    productArr[0]=p1;
-    productArr[1]=p2;
-    productArr1[0]=p3;
-    productArr1[1]=p4;
-    productArr1[2]=p5;
-    productArr2[0]=p6;
-    Factory factory;
-    factory.openFactory();
-    factory.startProduction(2,productArr,1);
-    factory.finishProduction(1);
-    factory.startSimpleBuyer(4);
-    assert(factory.finishSimpleBuyer(4) == 1);
-    factory.closeFactory();
-    return 0;
-}
-
-int startCompanyBuyerTest(){
-    Product p1(1,1);
-    Product p2(2,2);
-    Product p3(3,3);
-    Product p4(4,4);
-    Product p5(5,5);
-    Product p6(6,6);
-    Product productArr[2];
-    Product productArr1[3];
-    Product productArr2[1];
-    productArr[0]=p1;
-    productArr[1]=p2;
-    productArr1[0]=p3;
-    productArr1[1]=p4;
-    productArr1[2]=p5;
-    productArr2[0]=p6;
-    Factory factory;
-    factory.openFactory();
-    factory.startProduction(2,productArr,1);
-    factory.finishProduction(1);
-    factory.startSimpleBuyer(4);
-    assert(factory.finishSimpleBuyer(4) == 1);
-    factory.produce(3,productArr1);
-    assert(factory.tryBuyOne() == 2);
-    factory.startCompanyBuyer(2, 1, 20);
-    assert(factory.finishCompanyBuyer(20) == 0);
-    factory.startCompanyBuyer(1, 7, 21);
-    assert(factory.finishCompanyBuyer(21) == 1);
-    factory.startCompanyBuyer(2, 6, 22);
-    factory.startProduction(1,productArr2,30);
-    factory.finishProduction(30);
-    assert(factory.finishCompanyBuyer(22) == 1);
-    factory.closeFactory();
-    return 0;
-}
-
-int startThiefTest(){
-    Product p1(1,1);
-    Product p2(2,2);
-    Product p3(3,3);
-    Product p4(4,4);
-    Product p5(5,5);
-    Product p6(6,6);
-    Product productArr[2];
-    Product productArr1[3];
-    Product productArr2[1];
-    productArr[0]=p1;
-    productArr[1]=p2;
-    productArr1[0]=p3;
-    productArr1[1]=p4;
-    productArr1[2]=p5;
-    productArr2[0]=p6;
-    Factory factory;
-    factory.openFactory();
-    factory.startThief(1,20);
-    assert(factory.finishThief(20) == 0);
-    factory.startProduction(2,productArr,1);
-    factory.finishProduction(1);
-    factory.startThief(1,21);
-    assert(factory.finishThief(21) == 1);
-    //1 items left
-    factory.produce(3,productArr1);
-    //4 items left
-    factory.startThief(1,22);
-    factory.startThief(1,23);
-    assert(factory.finishThief(22) == 1);
-    assert(factory.finishThief(23) == 1);
-    //2 items left
-    factory.startThief(3,24);
-    factory.startThief(1,25);
-    int res1 = factory.finishThief(24);
-    int res2 = factory.finishThief(25);
-    assert((res1 == 2 && res2 == 0) || (res2 == 1 && res1 == 1));
-    factory.closeFactory();
-    return 0;
-}
-
-int startOpenCloseTest(){
-    Product p1(1,1);
-    Product p2(2,2);
-    Product p3(3,3);
-    Product p4(4,4);
-    Product p5(5,5);
-    Product p6(6,6);
-    Product productArr[2];
-    Product productArr1[3];
-    Product productArr2[1];
-    productArr[0]=p1;
-    productArr[1]=p2;
-    productArr1[0]=p3;
-    productArr1[1]=p4;
-    productArr1[2]=p5;
-    productArr2[0]=p6;
-    Factory factory;
-    factory.startProduction(2,productArr,1);
-    factory.finishProduction(1);
-    factory.produce(3,productArr1);
-    factory.openFactory();
-    factory.startSimpleBuyer(2);
-    factory.finishSimpleBuyer(2);
-    factory.startThief(1,20);
-    assert(factory.finishThief(20) == 1);
-    factory.closeFactory();
-    factory.startSimpleBuyer(3);
-    assert(factory.finishSimpleBuyer(3) == -1);
-    factory.startCompanyBuyer(2,1,19);
-    factory.openFactory();
-    assert(factory.finishCompanyBuyer(19) == 0);
-    factory.closeFactory();
-    return 0;
-}
-
-int startOpenCloseRetServiceTest(){
-    Product p1(1,1);
-    Product p2(2,2);
-    Product p3(3,3);
-    Product p4(4,4);
-    Product p5(5,5);
-    Product p6(6,6);
-    Product productArr[2];
-    Product productArr1[3];
-    Product productArr2[1];
-    productArr[0]=p1;
-    productArr[1]=p2;
-    productArr1[0]=p3;
-    productArr1[1]=p4;
-    productArr1[2]=p5;
-    productArr2[0]=p6;
-    Factory factory;
-    factory.closeReturningService();
-    factory.startProduction(2,productArr,1);
-    factory.finishProduction(1);
-    factory.produce(3,productArr1);
-    factory.startSimpleBuyer(2);
-    factory.finishSimpleBuyer(2);
-    factory.startThief(1,20);
-    assert(factory.finishThief(20) == 1);
-    factory.startCompanyBuyer(2,1,19);
-    assert(factory.finishCompanyBuyer(19) == 0);
-    factory.startCompanyBuyer(1,19,29);
-    factory.openReturningService();
-    assert(factory.finishCompanyBuyer(29) == 1);
-    factory.closeFactory();
-    return 0;
-}
-
-int listStolenProductsTest(){
-    Product p1(1,1);
-    Product p2(2,2);
-    Product p3(3,3);
-    Product p4(4,4);
-    Product p5(5,5);
-    Product p6(6,6);
-    Product productArr[2];
-    Product productArr1[3];
-    Product productArr2[1];
-    productArr[0]=p1;
-    productArr[1]=p2;
-    productArr1[0]=p3;
-    productArr1[1]=p4;
-    productArr1[2]=p5;
-    productArr2[0]=p6;
-    Factory factory;
-    factory.startProduction(2,productArr,1);
-    factory.finishProduction(1);
-    factory.produce(3,productArr1);
-    //5 items left
-    factory.startThief(2,20);
-    factory.startThief(2,21);
-    assert(factory.finishThief(21) == 2);
-    assert(factory.finishThief(20) == 2);
-    factory.startThief(1,23);
-    assert(factory.finishThief(23) == 1);
-    std::list<std::pair<Product, int>> stoList;
-    stoList = factory.listStolenProducts();
-    for(int i=0 ; i<5 ; i++){
-        Product p  = (*stoList.begin()).first;
-        assert(p.getId() == (i+1));
-        stoList.erase(stoList.begin());
+    for (int i = 0; i < 50; i++)
+    {
+        f->startCompanyBuyer(1, 10, i);
+        f->startThief(1, i+50);
     }
-    factory.closeFactory();
-    return 0;
-}
-
-int listAvailableProductsTest(){
-    Product p1(1,1);
-    Product p2(2,2);
-    Product p3(3,3);
-    Product p4(4,4);
-    Product p5(5,5);
-    Product p6(6,6);
-    Product productArr[2];
-    Product productArr1[3];
-    Product productArr2[1];
-    productArr[0]=p1;
-    productArr[1]=p2;
-    productArr1[0]=p3;
-    productArr1[1]=p4;
-    productArr1[2]=p5;
-    productArr2[0]=p6;
-    Factory factory;
-    factory.startProduction(2,productArr,1);
-    factory.finishProduction(1);
-    factory.produce(3,productArr1);
-    //5 items left
-    std::list<Product> avlList;
-    avlList = factory.listAvailableProducts();
-    for(int i=0 ; i<5 ; i++){
-        Product p  = *avlList.begin();
-        assert(p.getId() == (i+1));
-        avlList.erase(avlList.begin());
+    f->openFactory();
+    for (int i = 0; i < 50; i++)
+    {
+        assert(f->finishCompanyBuyer(i) == 1);
+        assert(f->finishThief(i+50) == 1);
     }
-    factory.closeFactory();
+    for (int i = 0; i < 50; i++)
+    {
+        f->startSimpleBuyer(100+i);
+    }
+    for (int i = 0; i < 50; i++)
+    {
+        f->finishSimpleBuyer(100+i); // I can't really check the return value here,
+        // so just making sure the test isn't crashing
+    }
+    delete f;
     return 0;
 }
 
-int main(){
-//    startSimpleBuyerTest();
-    produceTest();
-//    startProductionTest();
- //   startCompanyBuyerTest();
-//    startThiefTest();
- //   startOpenCloseTest();
-//    startOpenCloseRetServiceTest();
-//    listStolenProductsTest();
-//    listAvailableProductsTest();
+
+int main() {
+    for (int i = 0; i < 100; i++)
+    {
+        std::cout << "The test number is: " << i << "\n";
+        simpleBuyerTest();
+        companyTest();
+        thiefTest();
+        mainThreadTest();
+        smallSynchronizationTest();
+        bigSynchronizationTest();
+    }
+    std::cout << "Fin :)\n";
     return 0;
 }
